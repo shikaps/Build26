@@ -1,4 +1,6 @@
 import { workspaceApi } from "./api.js";
+import { mockAiService } from "./ai.js";
+import { mockAuth } from "./auth.js";
 
 const state = {
   page: "Dashboard",
@@ -8,6 +10,16 @@ const state = {
   suggestions: [],
   alertDismissed: false,
   sidebarOpen: false,
+  accountMenuOpen: false,
+  authenticated: true,
+  sessionUser: null,
+  authError: "",
+  authValues: {},
+  assignmentDraft: null,
+  assignmentRecommendations: [],
+  assignmentRecommendationIndex: 0,
+  assignmentLoading: false,
+  assignmentAccepted: false,
   error: "",
 };
 
@@ -16,14 +28,17 @@ const icons = {
   Projects: "▦",
   "My tasks": "✓",
   "AI Organizer": "✧",
+  "AI Task Assignment": "↳",
+  "AI Workload Alert": "↳",
   Team: "♧",
 };
+const appPages = ["Dashboard", "Projects", "My tasks", "AI Organizer", "AI Task Assignment", "AI Workload Alert", "Team", "Project", "Login", "Register"];
 
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[char]));
 const byId = (items, id) => items.find((item) => item.id === id);
-const currentUser = () => state.data.currentUser;
+const currentUser = () => state.sessionUser || state.data.currentUser;
 const projectTasks = (projectId) => state.data.tasks.filter((task) => task.projectId === projectId);
 const activeTasks = (tasks) => tasks.filter((task) => task.status !== "Done");
 
@@ -108,15 +123,34 @@ function topbar() {
 
 function sidebar() {
   const activeCount = activeTasks(state.data.tasks).length;
+  const active = (page) => state.page === page || (page === "Projects" && state.page === "Project") ? 'aria-current="page"' : "";
+  const isAiPage = ["AI Organizer", "AI Task Assignment", "AI Workload Alert"].includes(state.page);
   return `<aside class="sidebar ${state.sidebarOpen ? "open" : ""}">
-    <div class="brand"><span class="brand-mark">◒</span> orbit</div>
+    <button class="brand" data-page="Dashboard" aria-label="Orbit dashboard"><span class="brand-mark">◒</span> orbit</button>
     <div class="nav-label">WORKSPACE</div>
     <nav class="nav-links" aria-label="Main navigation">
-      ${["Dashboard", "Projects", "My tasks", "AI Organizer", "Team"].map((item) => `<button class="nav-item ${state.page === item || (item === "Projects" && state.page === "Project") ? "active" : ""}" data-page="${item}"><span class="nav-icon">${icons[item]}</span>${item}${item === "My tasks" ? `<span class="nav-badge">${activeCount}</span>` : ""}</button>`).join("")}
+      <button class="nav-item ${state.page === "Dashboard" ? "active" : ""}" data-page="Dashboard" ${active("Dashboard")}><span class="nav-icon">${icons.Dashboard}</span>Dashboard</button>
+      <button class="nav-item ${state.page === "Projects" || state.page === "Project" ? "active" : ""}" data-page="Projects" ${active("Projects")}><span class="nav-icon">${icons.Projects}</span>Projects</button>
+      <button class="nav-item ${state.page === "My tasks" ? "active" : ""}" data-page="My tasks" ${active("My tasks")}><span class="nav-icon">${icons["My tasks"]}</span>My tasks<span class="nav-badge">${activeCount}</span></button>
+      <div class="nav-group">
+        <button class="nav-item ${state.page === "AI Organizer" ? "active" : ""}" data-page="AI Organizer" ${active("AI Organizer")}><span class="nav-icon">${icons["AI Organizer"]}</span>AI Organizer</button>
+        <div class="ai-subnav" aria-label="AI tools">
+          <button class="nav-sub-item ${state.page === "AI Task Assignment" ? "active" : ""}" data-page="AI Task Assignment" ${active("AI Task Assignment")}><span class="nav-icon">${icons["AI Task Assignment"]}</span>Task Assignment</button>
+          <button class="nav-sub-item ${state.page === "AI Workload Alert" ? "active" : ""}" data-page="AI Workload Alert" ${active("AI Workload Alert")}><span class="nav-icon">${icons["AI Workload Alert"]}</span>Workload Alert</button>
+        </div>
+      </div>
+      <button class="nav-item ${state.page === "Team" ? "active" : ""}" data-page="Team" ${active("Team")}><span class="nav-icon">${icons.Team}</span>Team</button>
     </nav>
     <div class="sidebar-bottom">
       <div class="upgrade-card"><span style="color:#a7d1bb">✦</span><strong>A little help goes a long way</strong><p>Let AI turn your project goals into a clear team plan.</p><button class="upgrade-link" data-page="AI Organizer">Try AI organizer&nbsp; →</button></div>
-      <div class="user-mini">${avatar(currentUser())}<div class="user-mini-info"><strong>${escapeHtml(currentUser().name)}</strong><span>Student workspace</span></div><button class="btn-ghost" aria-label="Account options">···</button></div>
+      <div class="user-mini">${avatar(currentUser())}<div class="user-mini-info"><strong>${escapeHtml(currentUser().name)}</strong><span>Student workspace</span></div><button class="btn-ghost account-menu-toggle" data-account-menu-toggle aria-label="Account options" aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" aria-controls="account-menu">···</button>
+        <div class="account-menu" id="account-menu" role="menu" aria-label="Account options" ${state.accountMenuOpen ? "" : "hidden"}>
+          <button type="button" role="menuitem" data-account-action="profile">Profile</button>
+          <button type="button" role="menuitem" data-account-action="settings">Settings</button>
+          <span class="account-menu-divider" aria-hidden="true"></span>
+          <button type="button" role="menuitem" data-account-action="logout">Log out</button>
+        </div>
+      </div>
     </div>
   </aside>`;
 }
@@ -295,7 +329,98 @@ function aiOrganizer() {
       <section class="panel"><div class="panel-heading"><div><h2>Suggested plan</h2><p>${state.suggestions.length ? "Review, edit or accept each task before adding it." : "Your suggestions will appear here for you to review."}</p></div>${state.suggestions.some((item) => !item.accepted && !item.rejected) ? `<button class="text-link" data-action="accept-all">Accept all</button>` : ""}</div>
         <div id="suggestions-area">${state.isGenerating ? `<div class="ai-loading"><span class="spinner"></span> Thinking through your project plan…</div>` : state.suggestions.length ? state.suggestions.map((suggestion) => suggestionCard(suggestion)).join("") : `<div class="empty-state" style="padding-top:60px"><div class="empty-icon">✧</div><h3>A clear plan is a great start</h3><p>Tell us about your project and we’ll draft a few suggestions for your team to shape.</p></div>`}</div>
       </section>
+    </div>
+    <section class="panel ai-tools-panel"><div class="panel-heading"><div><h2>More AI tools</h2><p>Get a thoughtful second opinion on assignments and workload.</p></div></div><div class="ai-tool-links">
+      <button class="ai-tool-link" data-page="AI Task Assignment"><span class="stat-icon purple">↳</span><span><strong>AI Task Assignment</strong><small>Find a teammate for a task</small></span><span aria-hidden="true">→</span></button>
+      <button class="ai-tool-link" data-page="AI Workload Alert"><span class="stat-icon orange">⚠</span><span><strong>AI Workload Alert</strong><small>See how work is shared</small></span><span aria-hidden="true">→</span></button>
+    </div></section>`;
+}
+
+function assignmentDefaults() {
+  const project = byId(state.data.projects, state.activeProjectId) || state.data.projects[0];
+  return {
+    taskId: "",
+    title: "Prepare project presentation",
+    description: "Organize the team's final presentation and rehearse the key points.",
+    priority: "Medium",
+    dueDate: project?.deadline || "",
+    projectId: project?.id || "",
+    memberIds: project?.memberIds?.length ? [...project.memberIds] : state.data.members.map((member) => member.id),
+  };
+}
+
+function aiTaskAssignment() {
+  const draft = state.assignmentDraft || assignmentDefaults();
+  const chosen = state.assignmentRecommendations[state.assignmentRecommendationIndex];
+  const member = chosen && byId(state.data.members, chosen.memberId);
+  const tasks = [...state.data.tasks].sort((first, second) => first.title.localeCompare(second.title));
+  return `${pageHeading("AI task assignment", "Find a teammate with the time and skills to take the next step.", "", "")}
+    <div class="assignment-layout">
+      <section class="panel"><div class="panel-heading"><div><h2>Task details</h2><p>Choose an existing task or add a new one.</p></div><span class="stat-icon purple">✧</span></div>
+        <form id="assignment-form">
+          <div class="field"><label for="assignment-existing-task">Start with a task</label><select class="form-control" id="assignment-existing-task" name="taskId"><option value="">Create a new task</option>${tasks.map((task) => `<option value="${escapeHtml(task.id)}" ${draft.taskId === task.id ? "selected" : ""}>${escapeHtml(task.title)}</option>`).join("")}</select></div>
+          <div class="field"><label for="assignment-title">Task name</label><input class="form-control" id="assignment-title" name="title" required maxlength="100" value="${escapeHtml(draft.title)}" placeholder="e.g. Prepare project presentation"/></div>
+          <div class="field"><label for="assignment-description">Description</label><textarea class="form-control" id="assignment-description" name="description" placeholder="Add a little context for your teammate">${escapeHtml(draft.description)}</textarea></div>
+          <div class="form-grid">
+            <div class="field"><label for="assignment-project">Project</label><select class="form-control" id="assignment-project" name="projectId"><option value="">No project</option>${projectOptions(draft.projectId)}</select></div>
+            <div class="field"><label for="assignment-priority">Priority</label><select class="form-control" id="assignment-priority" name="priority">${["Low", "Medium", "High"].map((value) => `<option ${draft.priority === value ? "selected" : ""}>${value}</option>`).join("")}</select></div>
+            <div class="field full"><label for="assignment-deadline">Deadline</label><input class="form-control" id="assignment-deadline" name="dueDate" type="date" value="${escapeHtml(draft.dueDate)}" required/></div>
+          </div>
+          <div class="field"><label>Team members to consider</label><div class="member-check-list">${state.data.members.map((person) => `<label class="member-chip">${avatar(person, "tiny")}<input type="checkbox" name="assignment-member" value="${escapeHtml(person.id)}" ${draft.memberIds.includes(person.id) ? "checked" : ""}/> ${escapeHtml(person.name.split(" ")[0])}</label>`).join("")}</div></div>
+          <button class="btn btn-primary" type="submit" style="width:100%" ${state.assignmentLoading ? "disabled" : ""}>✧ Get assignment recommendation</button>
+        </form>
+      </section>
+      <section class="panel assignment-result" aria-live="polite"><div class="panel-heading"><div><h2>AI recommendation</h2><p>Mock recommendation based on your team's current task list.</p></div><span class="stat-icon green">✧</span></div>
+        ${state.assignmentLoading ? `<div class="ai-loading"><span class="spinner"></span> Looking at current team workload…</div>` : chosen ? `<div class="assignment-summary"><span class="eyebrow">TASK TO ASSIGN</span><h3>${escapeHtml(state.assignmentDraft.title)}</h3><p>${escapeHtml(state.assignmentDraft.description || "No description provided.")}</p><div class="suggestion-meta">${priorityTag(state.assignmentDraft.priority)}<span class="due-date">Due ${formatDate(state.assignmentDraft.dueDate)}</span></div></div>
+          <div class="assignment-person">${member ? avatar(member, "small") : ""}<div><span class="eyebrow">SUGGESTED MEMBER</span><strong>${escapeHtml(member?.name || "Team member")}</strong><span>${chosen.activeTasks} active task${chosen.activeTasks === 1 ? "" : "s"}</span></div><span class="status-pill done">Best fit</span></div>
+          <div class="assignment-reason"><strong>Why this match</strong><p>${escapeHtml(chosen.reason)}</p></div>
+          <div class="assignment-actions"><button class="btn btn-secondary" data-action="assignment-next">Choose another member</button><button class="btn btn-primary" data-action="assignment-accept" ${state.assignmentAccepted ? "disabled" : ""}>${state.assignmentAccepted ? "Assignment accepted" : "Accept assignment"}</button></div>
+          ${state.assignmentAccepted ? `<div class="inline-success" role="status">Task assignment updated in your workspace.</div>` : ""}` : `<div class="empty-state"><div class="empty-icon">✧</div><h3>A better-balanced team starts with a good fit</h3><p>Fill in the task details and we’ll suggest a teammate using the active tasks already in your workspace.</p></div>`}
+        ${state.assignmentError ? `<div class="error-state" role="alert">${escapeHtml(state.assignmentError)}</div>` : ""}
+      </section>
     </div>`;
+}
+
+function aiWorkloadAlert() {
+  const counts = state.data.members.map((member) => ({
+    member,
+    count: activeTasks(state.data.tasks).filter((task) => task.assigneeId === member.id).length,
+  }));
+  const maxCount = Math.max(1, ...counts.map((item) => item.count));
+  const alert = getWorkloadAlert();
+  const mostLoaded = alert && byId(state.data.members, alert.memberId);
+  const recipients = counts.filter((item) => item.member.id !== alert?.memberId).sort((first, second) => first.count - second.count).slice(0, 2);
+  return `${pageHeading("AI workload alert", "A shared view of how tasks are distributed across your team.", "", "")}
+    <section class="panel workload-panel"><div class="panel-heading"><div><h2>Current team workload</h2><p>Active task counts are calculated from your shared workspace tasks.</p></div><span class="stat-icon blue">♧</span></div>
+      ${counts.length ? `<div class="workload-list">${counts.map(({ member, count }) => `<div class="workload-row"><div class="workload-person">${avatar(member, "small")}<strong>${escapeHtml(member.name)}</strong></div><div class="workload-track"><div class="progress-track"><div class="progress-fill" style="width:${Math.round(count / maxCount * 100)}%"></div></div></div><span class="workload-count">${count} active task${count === 1 ? "" : "s"}</span><button class="text-link" data-workload-member="${escapeHtml(member.id)}">Review tasks</button></div>`).join("")}</div>` : `<div class="empty-state"><h3>No team members yet</h3><p>Add members to see how work is shared.</p><button class="btn btn-secondary btn-sm" data-page="Team">Open team</button></div>`}
+    </section>
+    ${alert && !state.alertDismissed ? `<section class="workload-feature-alert"><span class="alert-icon">⚠</span><div class="workload-feature-copy"><div class="eyebrow">WORKLOAD ALERT</div><h2>Workload imbalance detected</h2><p><strong>${escapeHtml(mostLoaded?.name || "A team member")}</strong> currently has significantly more active tasks than other team members.</p><div class="ai-suggestion-copy"><strong>AI suggestion</strong><p>Consider moving ${alert.suggestedMoves} task${alert.suggestedMoves === 1 ? "" : "s"} from ${escapeHtml(mostLoaded?.name || "this teammate")} to ${recipients.map((item) => escapeHtml(item.member.name.split(" ")[0])).join(" or ") || "another team member"}.</p></div><div class="alert-actions-large"><button class="btn btn-primary btn-sm" data-action="workload-review">Review tasks</button><button class="btn btn-secondary btn-sm" data-action="workload-dismiss">Dismiss alert</button></div></div></section>` : `<section class="panel workload-balanced"><span class="stat-icon green">✓</span><div><h2>${state.alertDismissed ? "Alert dismissed" : "Workload looks balanced"}</h2><p>${state.alertDismissed ? "Your team's workload alert has been dismissed." : "There is no significant workload imbalance in the current task data."}</p></div></section>`}`;
+}
+
+function authPage() {
+  const registering = state.page === "Register";
+  return `<main class="auth-shell">
+    <section class="auth-welcome">
+      <button class="auth-brand" data-page="Dashboard" aria-label="Orbit dashboard"><span class="brand-mark">◒</span> orbit</button>
+      <div class="auth-welcome-copy"><div class="eyebrow">YOUR STUDENT WORKSPACE</div><h1>Make room for the work that matters.</h1><p>Keep projects moving, stay in sync with your team, and celebrate every small win.</p></div>
+      <div class="auth-welcome-note"><span>✦</span> Thoughtful planning for student teams.</div>
+    </section>
+    <section class="auth-form-area"><div class="auth-form-card">
+      <div class="eyebrow">${registering ? "GET STARTED" : "WELCOME BACK"}</div>
+      <h2>${registering ? "Create your account" : "Sign in to Orbit"}</h2>
+      <p class="auth-subtitle">${registering ? "Your next project starts here." : "Pick up right where your team left off."}</p>
+      ${state.authError ? `<div class="auth-error" role="alert">${escapeHtml(state.authError)}</div>` : ""}
+      <form data-auth-form="${registering ? "register" : "login"}">
+        ${registering ? `<div class="field"><label for="auth-name">Name</label><input class="form-control" id="auth-name" name="name" autocomplete="name" required value="${escapeHtml(state.authValues.name || "")}" placeholder="Your name"/></div>` : ""}
+        <div class="field"><label for="auth-email">Email</label><input class="form-control" id="auth-email" name="email" type="email" autocomplete="email" required value="${escapeHtml(state.authValues.email || "")}" placeholder="you@campus.edu"/></div>
+        <div class="field"><label for="auth-password">Password</label><input class="form-control" id="auth-password" name="password" type="password" autocomplete="${registering ? "new-password" : "current-password"}" minlength="${registering ? 8 : 1}" required placeholder="${registering ? "At least 8 characters" : "Enter your password"}"/></div>
+        ${registering ? `<div class="field"><label for="auth-confirm-password">Confirm password</label><input class="form-control" id="auth-confirm-password" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required placeholder="Enter your password again"/></div>` : ""}
+        <button class="btn btn-primary auth-submit" type="submit">${registering ? "Create account" : "Log in"}</button>
+      </form>
+      <p class="auth-switch">${registering ? "Already have an account?" : "New to Orbit?"} <button class="text-link" data-page="${registering ? "Login" : "Register"}">${registering ? "Log in" : "Create an account"}</button></p>
+      <p class="auth-demo-note">Frontend preview only. Sign-in details are not saved.</p>
+    </div></section>
+  </main>`;
 }
 
 function suggestionCard(item) {
@@ -316,6 +441,10 @@ function render() {
     root.innerHTML = `<div style="min-height:100vh;display:grid;place-items:center;color:#819185;font-size:12px"><span class="spinner" style="margin-right:8px"></span> Loading your workspace…</div>`;
     return;
   }
+  if (!state.authenticated || state.page === "Login" || state.page === "Register") {
+    root.innerHTML = authPage();
+    return;
+  }
   let content;
   if (state.page === "Dashboard") content = dashboard();
   else if (state.page === "Projects") content = projectPage();
@@ -324,17 +453,63 @@ function render() {
     const project = byId(state.data.projects, state.activeProjectId);
     content = project ? projectDetail(project) : projectPage();
   } else if (state.page === "Team") content = teamPage();
+  else if (state.page === "AI Task Assignment") content = aiTaskAssignment();
+  else if (state.page === "AI Workload Alert") content = aiWorkloadAlert();
   else content = aiOrganizer();
   root.innerHTML = `<div class="shell">${sidebar()}<main class="main">${topbar()}${content}</main></div>`;
 }
 
-function setPage(page) {
-  state.page = page;
-  state.sidebarOpen = false;
-  if (page === "Projects" || page === "Project") state.filters = { member: "", priority: "", status: "", due: "", sort: "deadline" };
-  render();
-  window.scrollTo({ top: 0, behavior: "smooth" });
+const routeSlugs = {
+  Dashboard: "dashboard",
+  Projects: "projects",
+  "My tasks": "my-tasks",
+  "AI Organizer": "ai-organizer",
+  "AI Task Assignment": "ai-task-assignment",
+  "AI Workload Alert": "ai-workload-alert",
+  Team: "team",
+  Login: "login",
+  Register: "register",
+};
+
+function routeUrl(page, projectId = state.activeProjectId) {
+  return page === "Project" && projectId
+    ? `#project/${encodeURIComponent(projectId)}`
+    : `#${routeSlugs[page] || "dashboard"}`;
 }
+
+function routeFromLocation() {
+  const route = window.location.hash.slice(1);
+  const projectMatch = route.match(/^project\/([^/]+)$/);
+  if (projectMatch) {
+    return { page: "Project", projectId: decodeURIComponent(projectMatch[1]) };
+  }
+  const page = Object.keys(routeSlugs).find((candidate) => routeSlugs[candidate] === route);
+  return { page: page || "Dashboard", projectId: null };
+}
+
+function setPage(page, { pushHistory = true, projectId = state.activeProjectId, scroll = true } = {}) {
+  if (!appPages.includes(page)) page = "Dashboard";
+  if (page === "Project" && projectId) state.activeProjectId = projectId;
+  state.page = page;
+  state.authenticated = page !== "Login" && page !== "Register";
+  state.sidebarOpen = false;
+  state.accountMenuOpen = false;
+  state.authError = "";
+  if (page === "Projects" || page === "Project") state.filters = { member: "", priority: "", status: "", due: "", sort: "deadline" };
+  if (pushHistory) {
+    window.history.pushState({ orbit: true, page, projectId: state.activeProjectId }, "", routeUrl(page));
+  }
+  render();
+  if (scroll) {
+    document.querySelector(".main")?.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
+window.addEventListener("popstate", (event) => {
+  const route = event.state?.orbit ? event.state : routeFromLocation();
+  setPage(route.page, { pushHistory: false, projectId: route.projectId, scroll: false });
+});
 
 async function persist(message) {
   try {
@@ -344,6 +519,73 @@ async function persist(message) {
   } catch (error) {
     toast(error.message, true);
   }
+}
+
+async function requestAssignment(values) {
+  const memberIds = [...new Set(values.memberIds)];
+  if (!memberIds.length) {
+    toast("Choose at least one team member to consider.", true);
+    return;
+  }
+  state.assignmentDraft = { ...values, memberIds };
+  state.assignmentRecommendations = [];
+  state.assignmentRecommendationIndex = 0;
+  state.assignmentAccepted = false;
+  state.assignmentError = "";
+  state.assignmentLoading = true;
+  render();
+  try {
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+    state.assignmentRecommendations = await mockAiService.getAssignmentRecommendations({
+      tasks: state.data.tasks,
+      members: state.data.members,
+      memberIds,
+      deadline: values.dueDate,
+    });
+  } catch (error) {
+    state.assignmentError = error.message;
+  } finally {
+    state.assignmentLoading = false;
+    render();
+  }
+}
+
+async function acceptAssignment() {
+  const recommendation = state.assignmentRecommendations[state.assignmentRecommendationIndex];
+  const draft = state.assignmentDraft;
+  if (!recommendation || !draft) {
+    toast("Get an assignment recommendation first.", true);
+    return;
+  }
+  if (draft.taskId) {
+    const task = byId(state.data.tasks, draft.taskId);
+    if (!task) {
+      toast("That task is no longer available. Choose another task.", true);
+      return;
+    }
+    Object.assign(task, {
+      title: draft.title,
+      description: draft.description,
+      priority: draft.priority,
+      dueDate: draft.dueDate,
+      projectId: draft.projectId,
+      assigneeId: recommendation.memberId,
+    });
+  } else {
+    state.data.tasks.unshift({
+      id: `t${Date.now()}`,
+      title: draft.title,
+      description: draft.description,
+      priority: draft.priority,
+      dueDate: draft.dueDate,
+      projectId: draft.projectId,
+      assigneeId: recommendation.memberId,
+      status: "To Do",
+    });
+    state.assignmentDraft.taskId = state.data.tasks[0].id;
+  }
+  state.assignmentAccepted = true;
+  await persist("Task assignment updated");
 }
 
 function toast(message, isError = false) {
@@ -565,8 +807,39 @@ function reviewWorkload() {
 }
 
 document.addEventListener("click", (event) => {
+  if (!event.target.closest(".user-mini")) {
+    state.accountMenuOpen = false;
+    const menu = document.querySelector("#account-menu");
+    const toggle = document.querySelector("[data-account-menu-toggle]");
+    if (menu) menu.hidden = true;
+    if (toggle) toggle.setAttribute("aria-expanded", "false");
+  }
   const target = event.target.closest("button,[data-open-project]");
   if (!target) return;
+  if (target.dataset.accountMenuToggle !== undefined) {
+    state.accountMenuOpen = !state.accountMenuOpen;
+    render();
+    if (state.accountMenuOpen) document.querySelector("#account-menu [role='menuitem']")?.focus();
+    else document.querySelector("[data-account-menu-toggle]")?.focus();
+    return;
+  }
+  if (target.dataset.accountAction) {
+    const action = target.dataset.accountAction;
+    state.accountMenuOpen = false;
+    if (action === "logout") {
+      state.sessionUser = null;
+      setPage("Login");
+      toast("Signed out of this frontend preview.");
+      return;
+    }
+    render();
+    const messages = {
+      profile: "Profile details are not connected yet.",
+      settings: "Account settings are not connected yet.",
+    };
+    toast(messages[action]);
+    return;
+  }
   if (target.dataset.page) { setPage(target.dataset.page); return; }
   if (target.dataset.openProject) { state.activeProjectId = target.dataset.openProject; setPage("Project"); return; }
   if (target.dataset.projectMenu) {
@@ -582,6 +855,29 @@ document.addEventListener("click", (event) => {
   if (target.dataset.action === "dismiss-alert") { state.alertDismissed = true; render(); return; }
   if (target.dataset.action === "review-workload") { reviewWorkload(); return; }
   if (target.dataset.action === "accept-all") { acceptAllSuggestions(); return; }
+  if (target.dataset.action === "assignment-next") {
+    if (state.assignmentRecommendations.length > 1) {
+      state.assignmentRecommendationIndex = (state.assignmentRecommendationIndex + 1) % state.assignmentRecommendations.length;
+      state.assignmentAccepted = false;
+      render();
+    } else toast("There are no other selected members to suggest.", true);
+    return;
+  }
+  if (target.dataset.action === "assignment-accept") { acceptAssignment(); return; }
+  if (target.dataset.action === "workload-review") {
+    const alert = getWorkloadAlert();
+    if (alert) {
+      state.filters = { ...state.filters, member: alert.memberId, status: "" };
+      setPage("My tasks");
+    } else toast("Your team workload looks balanced.");
+    return;
+  }
+  if (target.dataset.action === "workload-dismiss") {
+    state.alertDismissed = true;
+    render();
+    toast("Workload alert dismissed");
+    return;
+  }
   if (target.dataset.action === "retry") { state.error = ""; initialize(); return; }
   if (target.dataset.action === "notifications") { toast("You’re all caught up."); return; }
   if (target.dataset.editTask) { taskModal(byId(state.data.tasks, target.dataset.editTask)); return; }
@@ -610,6 +906,11 @@ document.addEventListener("click", (event) => {
     }
     return;
   }
+  if (target.dataset.workloadMember) {
+    state.filters = { ...state.filters, member: target.dataset.workloadMember, status: "" };
+    setPage("My tasks");
+    return;
+  }
   if (target.dataset.suggestionAccept) { acceptSuggestion(state.suggestions.find((item) => item.id === target.dataset.suggestionAccept)); return; }
   if (target.dataset.suggestionReject) {
     const item = state.suggestions.find((suggestion) => suggestion.id === target.dataset.suggestionReject);
@@ -623,6 +924,27 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.accountMenuOpen) {
+    state.accountMenuOpen = false;
+    render();
+    document.querySelector("[data-account-menu-toggle]")?.focus();
+    return;
+  }
+  if (state.accountMenuOpen && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+    const items = [...document.querySelectorAll("#account-menu [role='menuitem']")];
+    const currentIndex = items.indexOf(document.activeElement);
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    items[(currentIndex + direction + items.length) % items.length]?.focus();
+    event.preventDefault();
+    return;
+  }
+  if (event.key === "ArrowDown" && event.target.matches("[data-account-menu-toggle]")) {
+    state.accountMenuOpen = true;
+    render();
+    document.querySelector("#account-menu [role='menuitem']")?.focus();
+    event.preventDefault();
+    return;
+  }
   if (event.key === "Enter" && event.target.matches("[data-open-project]")) {
     state.activeProjectId = event.target.dataset.openProject;
     setPage("Project");
@@ -631,6 +953,24 @@ document.addEventListener("keydown", (event) => {
 
 document.addEventListener("change", (event) => {
   const target = event.target;
+  if (target.id === "assignment-existing-task") {
+    const task = byId(state.data.tasks, target.value);
+    const project = task && byId(state.data.projects, task.projectId);
+    state.assignmentDraft = task ? {
+      taskId: task.id,
+      title: task.title,
+      description: task.description || "",
+      priority: task.priority,
+      dueDate: task.dueDate || "",
+      projectId: task.projectId || "",
+      memberIds: project?.memberIds?.length ? [...project.memberIds] : state.data.members.map((member) => member.id),
+    } : null;
+    state.assignmentRecommendations = [];
+    state.assignmentRecommendationIndex = 0;
+    state.assignmentAccepted = false;
+    render();
+    return;
+  }
   if (target.dataset.filter) {
     state.filters[target.dataset.filter] = target.value;
     render();
@@ -648,13 +988,63 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("submit", (event) => {
-  if (event.target.id !== "ai-form") return;
+  const formElement = event.target;
+  if (formElement.matches("[data-auth-form]")) {
+    event.preventDefault();
+    const values = new FormData(formElement);
+    state.authValues = {
+      name: String(values.get("name") || ""),
+      email: String(values.get("email") || ""),
+    };
+    state.authError = "";
+    const submit = async () => {
+      try {
+        if (formElement.dataset.authForm === "register") {
+          state.sessionUser = await mockAuth.register({
+            name: String(values.get("name") || ""),
+            email: String(values.get("email") || ""),
+            password: String(values.get("password") || ""),
+            confirmPassword: String(values.get("confirmPassword") || ""),
+          });
+        } else {
+          state.sessionUser = await mockAuth.login({
+            email: String(values.get("email") || ""),
+            password: String(values.get("password") || ""),
+            users: [...state.data.members, state.data.currentUser],
+          });
+        }
+        state.authValues = {};
+        setPage("Dashboard");
+        toast("Welcome to your student workspace.");
+      } catch (error) {
+        state.authError = error.message;
+        render();
+      }
+    };
+    submit();
+    return;
+  }
+  if (formElement.id === "assignment-form") {
+    event.preventDefault();
+    const values = new FormData(formElement);
+    requestAssignment({
+      taskId: String(values.get("taskId") || ""),
+      title: String(values.get("title") || "").trim(),
+      description: String(values.get("description") || "").trim(),
+      projectId: String(values.get("projectId") || ""),
+      priority: String(values.get("priority")),
+      dueDate: String(values.get("dueDate") || ""),
+      memberIds: values.getAll("assignment-member").map(String),
+    });
+    return;
+  }
+  if (formElement.id !== "ai-form") return;
   event.preventDefault();
   generateSuggestions({
     goal: document.querySelector("#ai-goal").value,
     deadline: document.querySelector("#ai-deadline").value,
     context: document.querySelector("#ai-context").value,
-    members: new FormData(event.target).getAll("ai-member"),
+    members: new FormData(formElement).getAll("ai-member"),
   });
 });
 
@@ -663,7 +1053,11 @@ async function initialize() {
   try {
     await new Promise((resolve) => window.setTimeout(resolve, 180));
     state.data = await workspaceApi.getWorkspace();
-    if (!state.activeProjectId) state.activeProjectId = state.data.projects[0]?.id || "";
+    const route = routeFromLocation();
+    state.page = route.page;
+    state.authenticated = route.page !== "Login" && route.page !== "Register";
+    state.activeProjectId = route.projectId || state.data.projects[0]?.id || "";
+    window.history.replaceState({ orbit: true, page: state.page, projectId: state.activeProjectId }, "", routeUrl(state.page));
     render();
   } catch (error) {
     state.error = error.message;

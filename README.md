@@ -18,6 +18,8 @@ Then open `http://localhost:8000`.
 - `styles.css` contains the responsive design system and component styles.
 - `src/data.js` provides the initial demonstration workspace.
 - `src/api.js` is the replaceable data-service boundary; it currently persists the mock workspace in `localStorage`.
-- `src/app.js` renders the dashboard, task and project views, team management, and AI organizer prototype.
+- `src/ai.js` provides replaceable, local mock assignment recommendations derived from the shared workspace tasks.
+- `src/auth.js` provides frontend-only login/register validation; credentials are never saved.
+- `src/app.js` renders the dashboard, task and project views, team management, AI tools, and temporary auth screens.
 
-The AI organizer intentionally returns clearly editable sample suggestions in the browser. Connect `workspaceApi` and the organizer submission to real API endpoints when those services are available; no backend or AI integration is included here.
+The AI organizer and task assignment intentionally return editable sample suggestions in the browser. Connect `workspaceApi`, `mockAuth`, and `mockAiService` to real services when those are available; no backend, Supabase, or AI integration is included here.

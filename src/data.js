@@ -8,10 +8,10 @@ const daysFromNow = (days) => {
 export const initialData = {
   currentUser: { id: "u1", name: "Alex Morgan", initials: "AM", email: "alex.morgan@campus.edu" },
   members: [
-    { id: "u1", name: "Alex Morgan", initials: "AM", color: "violet" },
-    { id: "u2", name: "Maya Chen", initials: "MC", color: "peach" },
-    { id: "u3", name: "Jordan Lee", initials: "JL", color: "blue" },
-    { id: "u4", name: "Sam Rivera", initials: "SR", color: "mint" },
+    { id: "u1", name: "Alex Morgan", initials: "AM", email: "alex.morgan@campus.edu", color: "violet" },
+    { id: "u2", name: "Maya Chen", initials: "MC", email: "maya.chen@campus.edu", color: "peach" },
+    { id: "u3", name: "Jordan Lee", initials: "JL", email: "jordan.lee@campus.edu", color: "blue" },
+    { id: "u4", name: "Sam Rivera", initials: "SR", email: "sam.rivera@campus.edu", color: "mint" },
   ],
   projects: [
     {
