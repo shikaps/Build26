@@ -181,10 +181,14 @@ function projectProgress(projectId) {
   };
 }
 
-function requireAuth(req) {
+function getBearerToken(req) {
   const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  if (!authHeader) return null;
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+}
 
+function requireAuth(req) {
+  const token = getBearerToken(req);
   if (!token) {
     return null;
   }
@@ -192,35 +196,143 @@ function requireAuth(req) {
   return state.sessions[token] || null;
 }
 
-async function resolveAuthUser(req) {
+function normalizeProfilePayload(user, profileRow = null, overrides = {}) {
+  const storedProfile = profileRow && typeof profileRow.profile_info === 'object' ? profileRow.profile_info : {};
+  const existingSettings = storedProfile.settings && typeof storedProfile.settings === 'object'
+    ? storedProfile.settings
+    : {};
+  const nextName = overrides.name || profileRow?.name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Student';
+  const email = overrides.email || profileRow?.email || user?.email || '';
+  const settings = {
+    ...existingSettings,
+    ...((overrides.settings && typeof overrides.settings === 'object') ? overrides.settings : {}),
+  };
+
+  return {
+    id: user?.id || profileRow?.id || overrides.id || null,
+    email,
+    name: nextName,
+    role: overrides.role || storedProfile.role || 'Student',
+    profile_info: {
+      ...storedProfile,
+      ...((overrides.profile_info && typeof overrides.profile_info === 'object') ? overrides.profile_info : {}),
+      settings,
+    },
+    created_at: profileRow?.created_at || new Date().toISOString(),
+    updated_at: profileRow?.updated_at || new Date().toISOString(),
+  };
+}
+
+async function getSupabaseClientWithToken(token) {
+  if (!supabase || !token) {
+    return null;
+  }
+
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  });
+}
+
+async function getAuthenticatedProfile(req) {
   const fallbackUser = requireAuth(req);
   if (fallbackUser) {
-    return fallbackUser;
+    return { user: fallbackUser, profile: fallbackUser };
   }
 
   if (!supabase) {
     return null;
   }
 
+  const token = getBearerToken(req);
+  if (!token) {
+    return null;
+  }
+
   try {
-    const authHeader = req.headers.authorization || '';
-    if (!authHeader.startsWith('Bearer ')) {
+    const client = await getSupabaseClientWithToken(token);
+    if (!client) {
       return null;
     }
 
-    const { data, error } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''));
-    if (error || !data?.user) {
+    const { data: userData, error: userError } = await client.auth.getUser(token);
+    if (userError || !userData?.user) {
       return null;
     }
 
-    return {
-      id: data.user.id,
-      email: data.user.email,
-      name: data.user.user_metadata?.full_name || data.user.email,
-    };
+    const { data: profileRow, error: profileError } = await client
+      .from('profiles')
+      .select('*')
+      .eq('id', userData.user.id)
+      .maybeSingle();
+
+    if (profileError && profileError.code !== 'PGRST116') {
+      throw profileError;
+    }
+
+    const normalized = normalizeProfilePayload(userData.user, profileRow);
+    return { user: normalized, profile: normalized };
   } catch (error) {
     return null;
   }
+}
+
+async function upsertProfileRow(token, user, profileInput = {}) {
+  if (!supabase || !token || !user?.id) {
+    return null;
+  }
+
+  const client = await getSupabaseClientWithToken(token);
+  if (!client) {
+    return null;
+  }
+
+  const { data: existingRow, error: lookupError } = await client
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (lookupError && lookupError.code !== 'PGRST116') {
+    throw lookupError;
+  }
+
+  const mergedProfile = normalizeProfilePayload(user, existingRow, profileInput);
+  const payload = {
+    id: user.id,
+    email: mergedProfile.email,
+    name: mergedProfile.name,
+    profile_info: mergedProfile.profile_info,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await client
+    .from('profiles')
+    .upsert(payload, { onConflict: 'id' })
+    .select('*')
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return normalizeProfilePayload(user, data, profileInput);
+}
+
+async function resolveAuthUser(req) {
+  const authenticated = await getAuthenticatedProfile(req);
+  if (!authenticated) {
+    return null;
+  }
+
+  return authenticated.user;
 }
 
 async function ensureProjectAccess(projectId, userId) {
@@ -491,6 +603,10 @@ app.post('/api/auth/signup', async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required.' });
     }
 
+    if (password.length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters long.' });
+    }
+
     if (supabase) {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -503,12 +619,33 @@ app.post('/api/auth/signup', async (req, res) => {
       });
 
       if (error) {
-        throw error;
+        if (String(error.message).toLowerCase().includes('already') || String(error.message).toLowerCase().includes('registered')) {
+          return res.status(409).json({ message: 'An account with this email already exists.' });
+        }
+        if (String(error.message).toLowerCase().includes('rate limit')) {
+          return res.status(429).json({ message: 'Too many signup attempts. Please try again later.' });
+        }
+        return res.status(400).json({ message: error.message || 'Signup failed.' });
       }
 
+      const token = data?.session?.access_token;
+      const sessionUser = data?.user || null;
+      const profile = token && sessionUser
+        ? await upsertProfileRow(token, sessionUser, {
+            name: name || sessionUser.user_metadata?.full_name || sessionUser.email?.split('@')[0] || '',
+            email: sessionUser.email,
+            role: 'Student',
+            settings: {
+              emailNotifications: true,
+              darkMode: false,
+            },
+          })
+        : null;
+
       return res.status(201).json({
-        user: data?.user || null,
+        user: profile || sessionUser || null,
         session: data?.session || null,
+        profile: profile || null,
       });
     }
 
@@ -522,6 +659,12 @@ app.post('/api/auth/signup', async (req, res) => {
       email,
       name: name || email.split('@')[0],
       role: 'Student',
+      profile_info: {
+        settings: {
+          emailNotifications: true,
+          darkMode: false,
+        },
+      },
     };
     state.users.push(newUser);
 
@@ -530,6 +673,7 @@ app.post('/api/auth/signup', async (req, res) => {
     return res.status(201).json({
       user: newUser,
       session: { access_token: sessionToken },
+      profile: newUser,
     });
   } catch (error) {
     res.status(500).json({
@@ -537,6 +681,12 @@ app.post('/api/auth/signup', async (req, res) => {
       error: error.message,
     });
   }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  return app._router.stack.some((layer) => layer.route && layer.route.path === '/api/auth/signup')
+    ? app._router.handle(req, res)
+    : res.status(404).json({ message: 'Not found.' });
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -549,12 +699,30 @@ app.post('/api/auth/login', async (req, res) => {
     if (supabase) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
-        throw error;
+        if (String(error.message).toLowerCase().includes('invalid') || String(error.message).toLowerCase().includes('credentials')) {
+          return res.status(401).json({ message: 'Invalid email or password.' });
+        }
+        return res.status(400).json({ message: error.message || 'Login failed.' });
       }
 
+      const token = data?.session?.access_token;
+      const user = data?.user || null;
+      const profile = token && user
+        ? await upsertProfileRow(token, user, {
+            name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+            email: user.email,
+            role: 'Student',
+            settings: {
+              emailNotifications: true,
+              darkMode: false,
+            },
+          })
+        : null;
+
       return res.json({
-        user: data?.user || null,
+        user: profile || user || null,
         session: data?.session || null,
+        profile: profile || null,
       });
     }
 
@@ -568,6 +736,7 @@ app.post('/api/auth/login', async (req, res) => {
     return res.json({
       user,
       session: { access_token: sessionToken },
+      profile: user,
     });
   } catch (error) {
     res.status(500).json({
@@ -579,11 +748,14 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/logout', async (req, res) => {
   try {
-    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    const token = getBearerToken(req);
     if (supabase && token) {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        throw error;
+      const client = await getSupabaseClientWithToken(token);
+      if (client) {
+        const { error } = await client.auth.signOut();
+        if (error) {
+          throw error;
+        }
       }
     }
 
@@ -600,6 +772,22 @@ app.post('/api/auth/logout', async (req, res) => {
   }
 });
 
+app.get('/api/auth/session', async (req, res) => {
+  try {
+    const authenticated = await getAuthenticatedProfile(req);
+    if (!authenticated) {
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+
+    res.json({ user: authenticated.user, profile: authenticated.profile, session: { access_token: getBearerToken(req) || null } });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to identify current session.',
+      error: error.message,
+    });
+  }
+});
+
 app.get('/api/auth/me', async (req, res) => {
   try {
     const user = await resolveAuthUser(req);
@@ -607,13 +795,185 @@ app.get('/api/auth/me', async (req, res) => {
       return res.status(401).json({ message: 'Not authenticated.' });
     }
 
-    res.json({ user });
+    res.json({ user, profile: user });
   } catch (error) {
     res.status(500).json({
       message: 'Unable to identify current user.',
       error: error.message,
     });
   }
+});
+
+async function getProfileResponse(req) {
+  const authenticated = await getAuthenticatedProfile(req);
+  if (!authenticated) return null;
+
+  const { user, profile } = authenticated;
+  return {
+    user,
+    profile,
+    settings: profile?.profile_info?.settings || {},
+  };
+}
+
+app.get('/api/auth/profile', async (req, res) => {
+  try {
+    const profileResponse = await getProfileResponse(req);
+    if (!profileResponse) {
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+
+    res.json(profileResponse);
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to load profile.',
+      error: error.message,
+    });
+  }
+});
+
+app.put('/api/auth/profile', async (req, res) => {
+  try {
+    const authenticated = await getAuthenticatedProfile(req);
+    if (!authenticated) {
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+
+    const token = getBearerToken(req);
+    const payload = req.body || {};
+    const nextName = String(payload.name || authenticated.user.name || '').trim() || authenticated.user.email?.split('@')[0] || 'Student';
+    const nextEmail = String(payload.email || authenticated.user.email || '').trim();
+    const settings = {
+      ...((authenticated.user.profile_info && authenticated.user.profile_info.settings) || {}),
+      ...((payload.settings && typeof payload.settings === 'object') ? payload.settings : {}),
+    };
+
+    let profile = authenticated.profile;
+    if (supabase && token) {
+      profile = await upsertProfileRow(token, { id: authenticated.user.id, email: nextEmail }, {
+        name: nextName,
+        email: nextEmail,
+        role: payload.role || authenticated.user.role || 'Student',
+        profile_info: {
+          ...(authenticated.user.profile_info || {}),
+          ...(payload.profile_info && typeof payload.profile_info === 'object' ? payload.profile_info : {}),
+          settings,
+        },
+      });
+    } else {
+      const existing = getUserByEmail(authenticated.user.email || nextEmail);
+      const userIndex = state.users.findIndex((user) => user.id === authenticated.user.id);
+      const updatedUser = {
+        ...authenticated.user,
+        name: nextName,
+        email: nextEmail,
+        role: payload.role || authenticated.user.role || 'Student',
+        profile_info: {
+          ...(authenticated.user.profile_info || {}),
+          ...(payload.profile_info && typeof payload.profile_info === 'object' ? payload.profile_info : {}),
+          settings,
+        },
+      };
+      if (userIndex >= 0) {
+        state.users[userIndex] = updatedUser;
+      }
+      if (existing && existing.id !== authenticated.user.id) {
+        return res.status(409).json({ message: 'Email already in use.' });
+      }
+      profile = updatedUser;
+    }
+
+    res.json({ user: profile, profile, settings: profile.profile_info?.settings || {} });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to update profile.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/auth/settings', async (req, res) => {
+  try {
+    const profileResponse = await getProfileResponse(req);
+    if (!profileResponse) {
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+
+    res.json({
+      settings: profileResponse.settings,
+      profile: profileResponse.profile,
+      user: profileResponse.user,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to load settings.',
+      error: error.message,
+    });
+  }
+});
+
+app.put('/api/auth/settings', async (req, res) => {
+  try {
+    const authenticated = await getAuthenticatedProfile(req);
+    if (!authenticated) {
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+
+    const token = getBearerToken(req);
+    const nextSettings = {
+      ...((authenticated.user.profile_info && authenticated.user.profile_info.settings) || {}),
+      ...((req.body && typeof req.body === 'object') ? req.body : {}),
+    };
+
+    let profile = authenticated.profile;
+    if (supabase && token) {
+      profile = await upsertProfileRow(token, { id: authenticated.user.id, email: authenticated.user.email }, {
+        name: authenticated.user.name,
+        email: authenticated.user.email,
+        role: authenticated.user.role || 'Student',
+        profile_info: {
+          ...(authenticated.user.profile_info || {}),
+          settings: nextSettings,
+        },
+      });
+    } else {
+      const userIndex = state.users.findIndex((user) => user.id === authenticated.user.id);
+      const updatedUser = {
+        ...authenticated.user,
+        profile_info: {
+          ...(authenticated.user.profile_info || {}),
+          settings: nextSettings,
+        },
+      };
+      if (userIndex >= 0) {
+        state.users[userIndex] = updatedUser;
+      }
+      profile = updatedUser;
+    }
+
+    res.json({
+      settings: profile.profile_info?.settings || {},
+      profile,
+      user: profile,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: 'Unable to update settings.',
+      error: error.message,
+    });
+  }
+});
+
+app.get('/api/account/profile', async (req, res) => {
+  return app._router.stack.some((layer) => layer.route && layer.route.path === '/api/auth/profile')
+    ? app._router.handle(req, res)
+    : res.status(404).json({ message: 'Not found.' });
+});
+
+app.get('/api/account/settings', async (req, res) => {
+  return app._router.stack.some((layer) => layer.route && layer.route.path === '/api/auth/settings')
+    ? app._router.handle(req, res)
+    : res.status(404).json({ message: 'Not found.' });
 });
 
 app.get('/api/projects', async (req, res) => {
