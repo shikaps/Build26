@@ -3,7 +3,7 @@ import { mockAiService } from "./ai.js";
 import { mockAuth } from "./auth.js";
 
 const state = {
-  page: "Dashboard",
+  page: "Login",
   data: null,
   activeProjectId: null,
   filters: { member: "", priority: "", status: "", due: "", sort: "deadline" },
@@ -11,7 +11,7 @@ const state = {
   alertDismissed: false,
   sidebarOpen: false,
   accountMenuOpen: false,
-  authenticated: true,
+  authenticated: false,
   sessionUser: null,
   authError: "",
   authValues: {},
@@ -510,7 +510,7 @@ function routeFromLocation() {
     return { page: "Project", projectId: decodeURIComponent(projectMatch[1]) };
   }
   const page = Object.keys(routeSlugs).find((candidate) => routeSlugs[candidate] === route);
-  return { page: page || "Dashboard", projectId: null };
+  return { page: page || "Login", projectId: null };
 }
 
 function setPage(page, { pushHistory = true, projectId = state.activeProjectId, scroll = true } = {}) {
