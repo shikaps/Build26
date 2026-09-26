@@ -45,6 +45,8 @@ a { color: inherit; text-decoration: none; }
 .upgrade-card p { color: #9dabb9; font-size: 11px; line-height: 1.6; margin: 0 0 11px; }
 .upgrade-link { color: #a9d2bd; font-size: 11px; font-weight: 700; }
 .user-mini { position: relative; display: flex; gap: 10px; align-items: center; border-top: 1px solid #344252; padding: 17px 7px 0; }
+.user-profile-link { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 0; border: 0; border-radius: 7px; background: transparent; color: inherit; text-align: left; }
+.user-profile-link:hover .user-mini-info strong { color: #b6ddc8; }
 .user-mini-info { min-width: 0; flex: 1; }
 .user-mini-info strong,.user-mini-info span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .user-mini-info strong { color: white; font-size: 12px; }
@@ -69,9 +71,11 @@ a { color: inherit; text-decoration: none; }
 .topbar { height: 79px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e9edf2; margin-bottom: 31px; }
 .breadcrumbs { color: #9aa4b1; font-size: 12px; }
 .breadcrumbs strong { color: #526073; font-weight: 600; }
-.top-actions { display: flex; align-items: center; gap: 12px; }
+.top-actions { display: flex; align-items: center; }
+.header-profile-button { display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; }
+.header-profile-button:hover .avatar { box-shadow: 0 0 0 3px #d9e9e0; }
+.header-profile-button:focus-visible { outline: 3px solid #aacfbf; outline-offset: 3px; }
 .icon-button { display: grid; place-items: center; border: 1px solid #e8edf1; background: white; color: #657286; width: 35px; height: 35px; border-radius: 10px; position: relative; }
-.notification-dot { position: absolute; right: 8px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: #ed917c; box-shadow: 0 0 0 2px white; }
 .mobile-menu { display: none; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin: 0 0 25px; }
 .eyebrow { color: #8a97a8; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; font-size: 10px; margin-bottom: 8px; }
@@ -268,6 +272,17 @@ textarea.form-control { min-height: 72px; resize: vertical; line-height: 1.5; }
 .workload-balanced { display: flex; align-items: center; gap: 12px; }
 .workload-balanced h2 { color: #455569; font: 700 14px Manrope,sans-serif; margin: 0 0 4px; }
 .workload-balanced p { color: #919dab; font-size: 11px; margin: 0; }
+.profile-card { margin-bottom: 16px; }
+.profile-identity { display: flex; align-items: center; gap: 17px; padding: 5px 2px 21px; border-bottom: 1px solid #edf0f3; }
+.profile-avatar { width: 66px; height: 66px; font-size: 18px; }
+.profile-identity .eyebrow { margin-bottom: 5px; }
+.profile-identity h2 { color: #344255; font: 700 19px Manrope,sans-serif; margin: 0 0 5px; }
+.profile-identity p { color: #909baa; font-size: 12px; margin: 0; }
+.profile-details { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 20px; }
+.profile-detail { display: grid; gap: 5px; padding: 14px 2px; border-bottom: 1px solid #f0f2f4; min-width: 0; }
+.profile-detail span { color: #929eab; font-size: 11px; }
+.profile-detail strong { color: #526074; font-size: 12px; overflow-wrap: anywhere; }
+.profile-stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
 .ai-loading { display: flex; align-items: center; gap: 9px; color: #789082; font-size: 10px; padding: 22px 2px; }
 .spinner { height: 15px; width: 15px; border: 2px solid #dbe8e1; border-top-color: #5f987b; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -343,8 +358,7 @@ textarea.form-control { min-height: 72px; resize: vertical; line-height: 1.5; }
   .main { padding: 0 14px 25px; }
   .topbar { margin-bottom: 19px; }
   .breadcrumbs { font-size: 10px; }
-  .top-actions { gap: 7px; }
-  .top-actions > .avatar { display: none; }
+  .top-actions { gap: 0; }
   .page-heading { align-items: flex-start; flex-direction: column; margin-bottom: 19px; }
   .page-heading .btn { align-self: stretch; }
   h1 { font-size: 22px; }
@@ -386,6 +400,8 @@ textarea.form-control { min-height: 72px; resize: vertical; line-height: 1.5; }
   .auth-welcome-copy p { font-size: 13px; }
   .auth-form-area { min-height: auto; padding: 20px 14px; }
   .auth-form-card { padding: 23px 18px; }
+  .profile-details { grid-template-columns: 1fr; }
+  .profile-stats { grid-template-columns: 1fr; }
 }
 @media(max-height: 700px) and (min-width: 781px) {
   .sidebar { padding-top: 18px; padding-bottom: 14px; }

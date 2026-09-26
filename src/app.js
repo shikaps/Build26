@@ -32,7 +32,7 @@ const icons = {
   "AI Workload Alert": "↳",
   Team: "♧",
 };
-const appPages = ["Dashboard", "Projects", "My tasks", "AI Organizer", "AI Task Assignment", "AI Workload Alert", "Team", "Project", "Login", "Register"];
+const appPages = ["Dashboard", "Projects", "My tasks", "AI Organizer", "AI Task Assignment", "AI Workload Alert", "Team", "Profile", "Project", "Login", "Register"];
 
 const escapeHtml = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -117,14 +117,13 @@ function topbar() {
       <button class="icon-button mobile-menu" data-action="menu" aria-label="Open navigation">☰</button>
       <div class="breadcrumbs">Workspace <span style="padding:0 7px;color:#c5ccd5">/</span> <strong>${escapeHtml(state.page === "Project" ? "Project overview" : state.page)}</strong></div>
     </div>
-    <div class="top-actions"><button class="icon-button" data-action="notifications" aria-label="Notifications">♧<span class="notification-dot"></span></button>${avatar(currentUser())}</div>
+    <div class="top-actions"><button class="header-profile-button" data-page="Profile" aria-label="Open profile">${avatar(currentUser())}</button></div>
   </header>`;
 }
 
 function sidebar() {
   const activeCount = activeTasks(state.data.tasks).length;
   const active = (page) => state.page === page || (page === "Projects" && state.page === "Project") ? 'aria-current="page"' : "";
-  const isAiPage = ["AI Organizer", "AI Task Assignment", "AI Workload Alert"].includes(state.page);
   return `<aside class="sidebar ${state.sidebarOpen ? "open" : ""}">
     <button class="brand" data-page="Dashboard" aria-label="Orbit dashboard"><span class="brand-mark">◒</span> orbit</button>
     <div class="nav-label">WORKSPACE</div>
@@ -143,11 +142,9 @@ function sidebar() {
     </nav>
     <div class="sidebar-bottom">
       <div class="upgrade-card"><span style="color:#a7d1bb">✦</span><strong>A little help goes a long way</strong><p>Let AI turn your project goals into a clear team plan.</p><button class="upgrade-link" data-page="AI Organizer">Try AI organizer&nbsp; →</button></div>
-      <div class="user-mini">${avatar(currentUser())}<div class="user-mini-info"><strong>${escapeHtml(currentUser().name)}</strong><span>Student workspace</span></div><button class="btn-ghost account-menu-toggle" data-account-menu-toggle aria-label="Account options" aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" aria-controls="account-menu">···</button>
+      <div class="user-mini"><button class="user-profile-link" data-page="Profile" aria-label="Open profile">${avatar(currentUser())}<span class="user-mini-info"><strong>${escapeHtml(currentUser().name)}</strong><span>Student workspace</span></span></button><button class="btn-ghost account-menu-toggle" data-account-menu-toggle aria-label="Account options" aria-haspopup="menu" aria-expanded="${state.accountMenuOpen}" aria-controls="account-menu">···</button>
         <div class="account-menu" id="account-menu" role="menu" aria-label="Account options" ${state.accountMenuOpen ? "" : "hidden"}>
           <button type="button" role="menuitem" data-account-action="profile">Profile</button>
-          <button type="button" role="menuitem" data-account-action="settings">Settings</button>
-          <span class="account-menu-divider" aria-hidden="true"></span>
           <button type="button" role="menuitem" data-account-action="logout">Log out</button>
         </div>
       </div>
@@ -397,6 +394,33 @@ function aiWorkloadAlert() {
     ${alert && !state.alertDismissed ? `<section class="workload-feature-alert"><span class="alert-icon">⚠</span><div class="workload-feature-copy"><div class="eyebrow">WORKLOAD ALERT</div><h2>Workload imbalance detected</h2><p><strong>${escapeHtml(mostLoaded?.name || "A team member")}</strong> currently has significantly more active tasks than other team members.</p><div class="ai-suggestion-copy"><strong>AI suggestion</strong><p>Consider moving ${alert.suggestedMoves} task${alert.suggestedMoves === 1 ? "" : "s"} from ${escapeHtml(mostLoaded?.name || "this teammate")} to ${recipients.map((item) => escapeHtml(item.member.name.split(" ")[0])).join(" or ") || "another team member"}.</p></div><div class="alert-actions-large"><button class="btn btn-primary btn-sm" data-action="workload-review">Review tasks</button><button class="btn btn-secondary btn-sm" data-action="workload-dismiss">Dismiss alert</button></div></div></section>` : `<section class="panel workload-balanced"><span class="stat-icon green">✓</span><div><h2>${state.alertDismissed ? "Alert dismissed" : "Workload looks balanced"}</h2><p>${state.alertDismissed ? "Your team's workload alert has been dismissed." : "There is no significant workload imbalance in the current task data."}</p></div></section>`}`;
 }
 
+function profilePage() {
+  const user = currentUser();
+  const workspaceMember = state.data.members.find((member) => member.id === user.id);
+  const assignedTasks = state.data.tasks.filter((task) => task.assigneeId === user.id);
+  const activeCount = activeTasks(assignedTasks).length;
+  const completedCount = assignedTasks.filter((task) => task.status === "Done").length;
+  const projectCount = state.data.projects.filter((project) => project.memberIds.includes(user.id)).length;
+  return `${pageHeading("Profile", "Your account information and workspace details.", "", "")}
+    <section class="panel profile-card">
+      <div class="profile-identity">${avatar(user, "profile-avatar")}<div><div class="eyebrow">STUDENT PROFILE</div><h2>${escapeHtml(user.name)}</h2><p>${escapeHtml(user.email || "Email not provided")}</p></div></div>
+      <div class="profile-details">
+        <div class="profile-detail"><span>Full name</span><strong>${escapeHtml(user.name)}</strong></div>
+        <div class="profile-detail"><span>Email</span><strong>${escapeHtml(user.email || "Email not provided")}</strong></div>
+        <div class="profile-detail"><span>Role</span><strong>Student</strong></div>
+        <div class="profile-detail"><span>Member status</span><strong>${workspaceMember ? "Workspace member" : "Signed-in student"}</strong></div>
+        <div class="profile-detail"><span>Account ID</span><strong>${escapeHtml(user.id || "Frontend profile")}</strong></div>
+      </div>
+    </section>
+    <section class="panel profile-workspace"><div class="panel-heading"><div><h2>Account information</h2><p>Your current activity across the Orbit workspace.</p></div></div>
+      <div class="profile-stats">
+        <div class="stat-card"><div class="stat-head">Projects <span class="stat-icon green">▦</span></div><div class="stat-value">${projectCount}</div></div>
+        <div class="stat-card"><div class="stat-head">Active tasks <span class="stat-icon blue">◷</span></div><div class="stat-value">${activeCount}</div></div>
+        <div class="stat-card"><div class="stat-head">Completed tasks <span class="stat-icon purple">✓</span></div><div class="stat-value">${completedCount}</div></div>
+      </div>
+    </section>`;
+}
+
 function authPage() {
   const registering = state.page === "Register";
   return `<main class="auth-shell">
@@ -455,6 +479,7 @@ function render() {
   } else if (state.page === "Team") content = teamPage();
   else if (state.page === "AI Task Assignment") content = aiTaskAssignment();
   else if (state.page === "AI Workload Alert") content = aiWorkloadAlert();
+  else if (state.page === "Profile") content = profilePage();
   else content = aiOrganizer();
   root.innerHTML = `<div class="shell">${sidebar()}<main class="main">${topbar()}${content}</main></div>`;
 }
@@ -467,6 +492,7 @@ const routeSlugs = {
   "AI Task Assignment": "ai-task-assignment",
   "AI Workload Alert": "ai-workload-alert",
   Team: "team",
+  Profile: "profile",
   Login: "login",
   Register: "register",
 };
@@ -832,12 +858,7 @@ document.addEventListener("click", (event) => {
       toast("Signed out of this frontend preview.");
       return;
     }
-    render();
-    const messages = {
-      profile: "Profile details are not connected yet.",
-      settings: "Account settings are not connected yet.",
-    };
-    toast(messages[action]);
+    if (action === "profile") setPage("Profile");
     return;
   }
   if (target.dataset.page) { setPage(target.dataset.page); return; }
