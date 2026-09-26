@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Student Task Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Student workspace</p>
+          <h1>Team Task Manager</h1>
+        </div>
+        <div class="status-pill" id="backendStatus">Checking backend...</div>
+      </header>
+
+      <main class="main-grid">
+        <section class="panel form-panel">
+          <div class="panel-header">
+            <h2>Add a task</h2>
+          </div>
+
+          <form id="taskForm" class="task-form">
+            <div class="field-group">
+              <label for="title">Task title</label>
+              <input id="title" name="title" type="text" placeholder="Prepare lab report" required />
+            </div>
+
+            <div class="field-group">
+              <label for="description">Description</label>
+              <textarea id="description" name="description" rows="4" placeholder="Describe the work and deadline details..." required></textarea>
+            </div>
+
+            <div class="two-columns">
+              <div class="field-group">
+                <label for="assignee">Assigned to</label>
+                <input id="assignee" name="assignee" type="text" placeholder="Mia" />
+              </div>
+
+              <div class="field-group">
+                <label for="team">Team</label>
+                <input id="team" name="team" type="text" placeholder="Design Team" />
+              </div>
+            </div>
+
+            <div class="two-columns">
+              <div class="field-group">
+                <label for="status">Status</label>
+                <select id="status" name="status">
+                  <option value="todo">To do</option>
+                  <option value="in_progress">In progress</option>
+                  <option value="done">Done</option>
+                </select>
+              </div>
+
+              <div class="field-group">
+                <label for="priority">Priority</label>
+                <select id="priority" name="priority">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="action-row">
+              <button type="button" class="secondary-button" id="suggestPriorityButton">AI priority suggestion</button>
+              <button type="submit" class="primary-button">Save task</button>
+            </div>
+
+            <div id="aiSuggestion" class="ai-box hidden"></div>
+          </form>
+        </section>
+
+        <section class="panel board-panel">
+          <div class="panel-header">
+            <h2>Board overview</h2>
+          </div>
+
+          <div class="kanban-grid">
+            <div class="column" data-status="todo">
+              <div class="column-header">
+                <h3>To do</h3>
+                <span id="todoCount" class="count-badge">0</span>
+              </div>
+              <div id="todoList" class="task-list"></div>
+            </div>
+
+            <div class="column" data-status="in_progress">
+              <div class="column-header">
+                <h3>In progress</h3>
+                <span id="inProgressCount" class="count-badge">0</span>
+              </div>
+              <div id="inProgressList" class="task-list"></div>
+            </div>
+
+            <div class="column" data-status="done">
+              <div class="column-header">
+                <h3>Done</h3>
+                <span id="doneCount" class="count-badge">0</span>
+              </div>
+              <div id="doneList" class="task-list"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
